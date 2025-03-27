@@ -62,21 +62,20 @@ def send_news(context: CallbackContext):
 
 def get_next_match():
     print("📡 Buscando próximos partidos del Burgos CF (vía Sportmonks)...")
-    url = f"{SPORTMONKS_API_URL}/fixtures"
+    url = f"{SPORTMONKS_API_URL}/teams/{TEAM_ID}?include=fixtures"
     params = {
         "api_token": SPORTMONKS_API_TOKEN,
-        "filters[team_id]": TEAM_ID,
-        "sort": "starting_at",
-        "include": "localTeam,visitorTeam",
-        "per_page": 1
     }
     response = requests.get(url, params=params)
     print(f"🔧 Status code: {response.status_code}")
     data = response.json()
     print(json.dumps(data, indent=2))
 
-    if "data" in data and data["data"]:
-        return data["data"][0]
+    if "data" in data and "fixtures" in data["data"] and "data" in data["data"]["fixtures"]:
+        futuros = [f for f in data["data"]["fixtures"]["data"] if f["starting_at"] > datetime.utcnow().isoformat()]
+        if futuros:
+            partidos_ordenados = sorted(futuros, key=lambda x: x["starting_at"])
+            return partidos_ordenados[0]
     return None
 
 # Guarda los eventos ya publicados
