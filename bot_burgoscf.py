@@ -58,7 +58,7 @@ def send_news(context: CallbackContext):
     for noticia in noticias:
         context.bot.send_message(chat_id=CHANNEL_ID, text=noticia)
 
-# Integración con Bluesky
+# Integración con Bluesky: obtener posts desde la cuenta de Bluesky
 def fetch_bluesky_posts():
     url = "https://bsky.social/xrpc/app.bsky.feed.getActorTimeline"
     params = {
@@ -78,7 +78,6 @@ def fetch_bluesky_posts():
 def send_bluesky_posts(context: CallbackContext):
     posts = fetch_bluesky_posts()
     for post in posts:
-        # Extraemos un identificador único para evitar duplicados
         post_id = post.get("post", {}).get("cid") or post.get("post", {}).get("uri")
         if post_id and post_id not in posted_bluesky_ids:
             text = post.get("post", {}).get("text", "")
@@ -86,42 +85,6 @@ def send_bluesky_posts(context: CallbackContext):
             message = f"🌀 Bluesky:\n{text}\n🕒 {created_at}"
             context.bot.send_message(chat_id=CHANNEL_ID, text=message)
             posted_bluesky_ids.add(post_id)
-
-# Función para obtener el próximo partido mediante scraping en Flashscore usando Playwright
-def send_next_match(context: CallbackContext):
-    asyncio.run(scrape_flashscore(context))
-
-async def scrape_flashscore(context: CallbackContext):
-    print("📡 Buscando próximos partidos del Burgos CF (Playwright/Flashscore)...")
-    try:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            page = await browser.new_page()
-            # Usamos la URL de Flashscore para el Burgos CF
-            await page.goto("https://www.flashscore.com/team/burgos-cf/vTxTEFi6/")
-            await page.wait_for_selector("div.event__match")
-            
-            partidos = await page.query_selector_all("div.event__match")
-            for elem in partidos:
-                clase = await elem.get_attribute("class")
-                if "event__match--scheduled" in clase:
-                    hora_elem = await elem.query_selector(".event__time")
-                    local_elem = await elem.query_selector(".event__participant--home")
-                    visitante_elem = await elem.query_selector(".event__participant--away")
-                    
-                    hora_text = await hora_elem.inner_text() if hora_elem else ""
-                    local_text = await local_elem.inner_text() if local_elem else ""
-                    visitante_text = await visitante_elem.inner_text() if visitante_elem else ""
-                    
-                    mensaje = f"📅 Próximo partido del Burgos CF:\n🏟️ {local_text} vs {visitante_text}\n🕒 Hora: {hora_text}"
-                    await browser.close()
-                    context.bot.send_message(chat_id=CHANNEL_ID, text=mensaje)
-                    return
-            
-            await browser.close()
-            context.bot.send_message(chat_id=CHANNEL_ID, text="❌ No hay partido programado próximamente en Flashscore.")
-    except Exception as e:
-        context.bot.send_message(chat_id=CHANNEL_ID, text=f"⚠️ Error con Flashscore: {e}")
 
 def main():
     global bot
@@ -132,12 +95,10 @@ def main():
     
     dispatcher.add_handler(CommandHandler("start", start))
     
-    # Programar envío de noticias cada 1 hora
+    # Programa el envío de noticias cada 1 hora
     updater.job_queue.run_repeating(send_news, interval=3600, first=10)
-    # Programar envío de posts de Bluesky cada 1 hora
+    # Programa el envío de posts de Bluesky cada 1 hora
     updater.job_queue.run_repeating(send_bluesky_posts, interval=3600, first=20)
-    # Programar envío del próximo partido cada 4 horas
-    updater.job_queue.run_repeating(send_next_match, interval=14400, first=30)
     
     updater.start_polling()
     updater.idle()
