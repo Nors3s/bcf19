@@ -84,9 +84,7 @@ def send_next_match(context: CallbackContext):
                 hora = p.find_element(By.CLASS_NAME, "event__time").text
                 local = p.find_element(By.CLASS_NAME, "event__participant--home").text
                 visitante = p.find_element(By.CLASS_NAME, "event__participant--away").text
-                mensaje = f"📅 Próximo partido del Burgos CF:
-🏟️ {local} vs {visitante}
-🕒 Hora: {hora}"
+                mensaje = f"📅 Próximo partido del Burgos CF:\\n🏟️ {local} vs {visitante}\\n🕒 Hora: {hora}"
 
                 context.bot.send_message(chat_id=CHANNEL_ID, text=mensaje)
                 break
