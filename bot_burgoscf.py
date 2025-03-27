@@ -12,19 +12,17 @@ import json
 
 # Configura variables desde entorno (Railway o Render)
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-FOOTBALL_API_KEY = os.getenv("FOOTBALL_API_KEY")
+BESOCCER_API_TOKEN = os.getenv("BESOCCER_API_TOKEN")
 CHANNEL_ID = "@BurgosCF"  # <-- CAMBIA esto por tu canal real si no lo has hecho
 
 # Validación de variables obligatorias
 if not TELEGRAM_TOKEN:
     raise ValueError("❌ TELEGRAM_TOKEN no está definido. Añádelo como variable de entorno.")
-if not FOOTBALL_API_KEY:
-    raise ValueError("❌ FOOTBALL_API_KEY no está definido. Añádelo como variable de entorno.")
+if not BESOCCER_API_TOKEN:
+    raise ValueError("❌ BESOCCER_API_TOKEN no está definido. Añádelo como variable de entorno.")
 
-FOOTBALL_API_URL = "https://v3.football.api-sports.io"
-TEAM_ID_BURGOS = 2826  # ID del Burgos CF en API-Football (LaLiga SmartBank)
-LEAGUE_ID = 141  # Segunda División España
-SEASON = 2024
+BESOCCER_API_URL = "https://apiv2.besoccer.com"
+TEAM_NAME = "burgos"
 
 # Noticias RSS
 RSS_FEEDS = [
@@ -37,9 +35,7 @@ logger = logging.getLogger(__name__)
 
 bot = None
 posted_titles = set()
-headers_api = {
-    "x-apisports-key": FOOTBALL_API_KEY
-}
+
 
 def start(update: Update, context: CallbackContext):
     update.message.reply_text('¡Bot del Burgos CF en marcha!')
@@ -64,27 +60,21 @@ def send_news(context: CallbackContext):
         context.bot.send_message(chat_id=CHANNEL_ID, text=noticia)
 
 def get_next_match():
-    print("📡 Buscando próximos partidos del Burgos CF...")
-    hoy = datetime.utcnow().strftime("%Y-%m-%d")
-    url = f"{FOOTBALL_API_URL}/fixtures?team={TEAM_ID_BURGOS}&season={SEASON}&from={hoy}&limit=50&timezone=UTC"
-    response = requests.get(url, headers=headers_api)
+    print("📡 Buscando próximos partidos del Burgos CF (vía BeSoccer)...")
+    url = f"{BESOCCER_API_URL}/matches/team/next/"  # Endpoint genérico, puede necesitar ajuste según la documentación
+    params = {
+        "token": BESOCCER_API_TOKEN,
+        "format": "json",
+        "team": TEAM_NAME,
+        "tz": "Europe/Madrid"
+    }
+    response = requests.get(url, params=params)
+    print(f"🔧 Status code: {response.status_code}")
     data = response.json()
-    print(json.dumps(data, indent=2))  # Depuración: mostrar toda la respuesta
-    partidos = data.get("response", [])
+    print(json.dumps(data, indent=2))
 
-    print(f"🔍 Total partidos recibidos: {len(partidos)}")
-    for p in partidos:
-        estado = p['fixture']['status']['short']
-        fecha = p['fixture']['date']
-        local = p['teams']['home']['name']
-        visitante = p['teams']['away']['name']
-        print(f" - {fecha} | {local} vs {visitante} | Estado: {estado}")
-
-    futuros = [p for p in partidos if p["fixture"]["status"]["short"] in ["NS", "TBD"]]
-
-    if futuros:
-        partidos_ordenados = sorted(futuros, key=lambda x: x["fixture"]["date"])
-        return partidos_ordenados[0]
+    if "matches" in data and data["matches"]:
+        return data["matches"][0]  # Primer partido
     return None
 
 # Guarda los eventos ya publicados
@@ -96,38 +86,18 @@ def seguimiento_partido(context: CallbackContext):
         context.bot.send_message(chat_id=CHANNEL_ID, text="❌ No hay partido programado próximamente.")
         return
 
-    fixture_id = partido["fixture"]["id"]
-    equipos = partido["teams"]
-    fecha_utc = datetime.strptime(partido["fixture"]["date"], "%Y-%m-%dT%H:%M:%S%z")
-    fecha_madrid = fecha_utc.astimezone(pytz.timezone("Europe/Madrid"))
+    local = partido['local']['name']
+    visitante = partido['visitor']['name']
+    fecha_str = partido['date']
+
+    fecha_obj = datetime.strptime(fecha_str, "%Y-%m-%d %H:%M:%S")
+    fecha_madrid = fecha_obj.astimezone(pytz.timezone("Europe/Madrid"))
     fecha_formateada = fecha_madrid.strftime("%A, %d de %B a las %H:%M")
 
-    info_partido = f"🏟️ {equipos['home']['name']} vs {equipos['away']['name']}\n🗓️ {fecha_formateada} (hora española)"
+    info_partido = f"🏟️ {local} vs {visitante}\n🗓️ {fecha_formateada} (hora española)"
     context.bot.send_message(chat_id=CHANNEL_ID, text=f"🏁 ¡Empieza el seguimiento del próximo partido!\n{info_partido}")
 
-    while True:
-        eventos_url = f"{FOOTBALL_API_URL}/fixtures/events?fixture={fixture_id}"
-        eventos_res = requests.get(eventos_url, headers=headers_api).json()
-        for evento in eventos_res["response"]:
-            key = f"{evento['time']['elapsed']}-{evento['team']['id']}-{evento['player']['name']}-{evento['type']}"
-            if key not in posted_events:
-                minuto = evento['time']['elapsed']
-                tipo = evento['type']
-                detalle = evento['detail']
-                jugador = evento['player']['name']
-                texto = ""
-                if tipo == "Goal":
-                    texto = f"⚽️ ¡Gol de {jugador}! ({minuto}')"
-                elif tipo == "Card":
-                    emoji = "🟨" if detalle == "Yellow Card" else "🟥"
-                    texto = f"{emoji} Tarjeta para {jugador} ({minuto}')"
-                elif tipo == "subst":
-                    texto = f"🔁 Cambio: {jugador} entra ({minuto}')"
-
-                if texto:
-                    context.bot.send_message(chat_id=CHANNEL_ID, text=texto)
-                    posted_events.add(key)
-        time.sleep(60)
+    # ⚠️ Aquí puedes añadir seguimiento de eventos si BeSoccer lo permite en el plan
 
 def main():
     global bot
