@@ -65,7 +65,7 @@ def send_news(context: CallbackContext):
 def get_next_match():
     print("📡 Buscando próximos partidos del Burgos CF...")
     hoy = datetime.utcnow().strftime("%Y-%m-%d")
-    url = f"{FOOTBALL_API_URL}/fixtures?team={TEAM_ID_BURGOS}&season={SEASON}&league={LEAGUE_ID}&from={hoy}&limit=50&timezone=UTC"
+    url = f"{FOOTBALL_API_URL}/fixtures?team={TEAM_ID_BURGOS}&season={SEASON}&from={hoy}&limit=50&timezone=UTC"
     response = requests.get(url, headers=headers_api)
     data = response.json()
     partidos = data.get("response", [])
@@ -144,3 +144,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
