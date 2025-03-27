@@ -16,6 +16,8 @@ BESOCCER_API_TOKEN = os.getenv("BESOCCER_API_TOKEN")
 CHANNEL_ID = "@BurgosCF"  # <-- CAMBIA esto por tu canal real si no lo has hecho
 
 # Validación de variables obligatorias
+print("🔍 TELEGRAM_TOKEN:", "✅" if TELEGRAM_TOKEN else "❌ VACÍO")
+print("🔍 BESOCCER_API_TOKEN:", "✅" if BESOCCER_API_TOKEN else "❌ VACÍO")
 if not TELEGRAM_TOKEN:
     raise ValueError("❌ TELEGRAM_TOKEN no está definido. Añádelo como variable de entorno.")
 if not BESOCCER_API_TOKEN:
