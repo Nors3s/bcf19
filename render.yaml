@@ -1,8 +1,0 @@
-services:
-  - type: web
-    name: burgoscf-bot
-    env: python
-    plan: free
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "python bot_burgoscf.py"
-    autoDeploy: true
