@@ -64,12 +64,16 @@ def send_news(context: CallbackContext):
 
 def get_next_match():
     hoy = datetime.utcnow().strftime("%Y-%m-%d")
-    url = f"{FOOTBALL_API_URL}/fixtures?team={TEAM_ID_BURGOS}&season={SEASON}&league={LEAGUE_ID}&from={hoy}&timezone=UTC"
+    url = f"{FOOTBALL_API_URL}/fixtures?team={TEAM_ID_BURGOS}&season={SEASON}&league={LEAGUE_ID}&from={hoy}&limit=50&timezone=UTC"
     response = requests.get(url, headers=headers_api)
     data = response.json()
     partidos = data.get("response", [])
-    if partidos:
-        partidos_ordenados = sorted(partidos, key=lambda x: x["fixture"]["date"])
+
+    # Filtrar por estados válidos (NS = Not Started, TBD = To Be Determined)
+    futuros = [p for p in partidos if p["fixture"]["status"]["short"] in ["NS", "TBD"]]
+
+    if futuros:
+        partidos_ordenados = sorted(futuros, key=lambda x: x["fixture"]["date"])
         return partidos_ordenados[0]
     return None
 
@@ -132,4 +136,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
