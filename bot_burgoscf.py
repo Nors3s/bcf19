@@ -5,31 +5,26 @@ import os
 from telegram import Bot
 from telegram.ext import Updater, CommandHandler, CallbackContext
 from telegram.update import Update
-import time
-from datetime import datetime, timedelta
+from datetime import datetime
 import pytz
 import json
+from bs4 import BeautifulSoup
 
 # Configura variables desde entorno (Railway o Render)
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-SPORTMONKS_API_TOKEN = os.getenv("SPORTMONKS_API_TOKEN")
 CHANNEL_ID = "@BurgosCF"
 
 # Validación de variables obligatorias
 print("🔍 TELEGRAM_TOKEN:", "✅" if TELEGRAM_TOKEN else "❌ VACÍO")
-print("🔍 SPORTMONKS_API_TOKEN:", "✅" if SPORTMONKS_API_TOKEN else "❌ VACÍO")
 if not TELEGRAM_TOKEN:
     raise ValueError("❌ TELEGRAM_TOKEN no está definido. Añádelo como variable de entorno.")
-if not SPORTMONKS_API_TOKEN:
-    raise ValueError("❌ SPORTMONKS_API_TOKEN no está definido. Añádelo como variable de entorno.")
-
-SPORTMONKS_API_URL = "https://api.sportmonks.com/v3/football"
-TEAM_ID = 1873  # Burgos CF en Sportmonks
 
 # Noticias RSS
 RSS_FEEDS = [
     "https://www.burgosdeporte.com/index.php/feed/",
-    "https://revistaforofos.com/feed/"
+    "https://revistaforofos.com/feed/",
+    "https://www.burgosconecta.es/burgoscf/rss",
+    "https://www.diariodeburgos.es/seccion/burgos+cf/f%C3%BAtbol/deportes/rss"
 ]
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -60,86 +55,21 @@ def send_news(context: CallbackContext):
     for noticia in noticias:
         context.bot.send_message(chat_id=CHANNEL_ID, text=noticia)
 
-def get_next_match():
-    print("📡 Buscando próximos partidos del Burgos CF (vía Sportmonks)...")
-    url = f"{SPORTMONKS_API_URL}/teams/{TEAM_ID}?include=fixtures"
-    params = {
-        "api_token": SPORTMONKS_API_TOKEN,
-    }
-    response = requests.get(url, params=params)
-    print(f"🔧 Status code: {response.status_code}")
-    data = response.json()
-    print(json.dumps(data, indent=2))
+def send_next_match(context: CallbackContext):
+    print("📡 Buscando próximos partidos del Burgos CF (scraping burgosdeporte.com)...")
+    url = "https://www.burgosdeporte.com/index.php/category/burgos-cf/"
+    response = requests.get(url)
+    soup = BeautifulSoup(response.text, "html.parser")
 
-    if "data" in data and "fixtures" in data["data"] and "data" in data["data"]["fixtures"]:
-        futuros = [f for f in data["data"]["fixtures"]["data"] if f["starting_at"] > datetime.utcnow().isoformat()]
-        if futuros:
-            partidos_ordenados = sorted(futuros, key=lambda x: x["starting_at"])
-            return partidos_ordenados[0]
-    return None
-
-# Guarda los eventos ya publicados
-posted_events = set()
-
-def seguimiento_partido(context: CallbackContext):
-    partido = get_next_match()
-    if not partido:
-        context.bot.send_message(chat_id=CHANNEL_ID, text="❌ No hay partido programado próximamente.")
-        return
-
-    fixture_id = partido['id']
-    local = partido['localTeam']['data']['name']
-    visitante = partido['visitorTeam']['data']['name']
-    fecha_str = partido['starting_at']
-    fecha_obj = datetime.strptime(fecha_str, "%Y-%m-%dT%H:%M:%S%z")
-    fecha_madrid = fecha_obj.astimezone(pytz.timezone("Europe/Madrid"))
-    fecha_formateada = fecha_madrid.strftime("%A, %d de %B a las %H:%M")
-
-    info_partido = f"🏟️ {local} vs {visitante}\n🗓️ {fecha_formateada} (hora española)"
-    context.bot.send_message(chat_id=CHANNEL_ID, text=f"🏁 ¡Empieza el seguimiento del próximo partido!\n{info_partido}")
-
-    # Seguimiento en tiempo real (eventos)
-    partido_finalizado = False
-    while not partido_finalizado:
-        eventos_url = f"{SPORTMONKS_API_URL}/fixtures/{fixture_id}?include=events"
-        params = {"api_token": SPORTMONKS_API_TOKEN}
-        res = requests.get(eventos_url, params=params)
-        data = res.json()
-
-        # Verificar si el partido ha finalizado
-        status = data.get("data", {}).get("status")
-        if status and status.lower() in ["ft", "fulltime", "ended"]:
-            marcador_local = data["data"].get("scores", {}).get("local_score", "?")
-            marcador_visitante = data["data"].get("scores", {}).get("visitor_score", "?")
-            resultado = f"⏱️ Final del partido: {local} {marcador_local} - {marcador_visitante} {visitante}"
-            context.bot.send_message(chat_id=CHANNEL_ID, text=resultado)
-            break
-
-        if "data" in data and "events" in data["data"] and "data" in data["data"]["events"]:
-            for evento in data["data"]["events"]["data"]:
-                event_id = evento.get("id")
-                if event_id in posted_events:
-                    continue
-                posted_events.add(event_id)
-
-                tipo = evento.get("type")
-                jugador = evento.get("player_name", "")
-                minuto = evento.get("minute", "")
-                texto = ""
-
-                if tipo == "goal":
-                    texto = f"⚽️ ¡Gol de {jugador}! ({minuto}')"
-                elif tipo == "yellowcard":
-                    texto = f"🟨 Tarjeta amarilla para {jugador} ({minuto}')"
-                elif tipo == "redcard":
-                    texto = f"🟥 Tarjeta roja para {jugador} ({minuto}')"
-                elif tipo == "substitution":
-                    texto = f"🔁 Cambio: {jugador} entra ({minuto}')"
-
-                if texto:
-                    context.bot.send_message(chat_id=CHANNEL_ID, text=texto)
-
-        time.sleep(60)
+    posibles = soup.find_all("article", limit=5)
+    for post in posibles:
+        titulo = post.find("h2")
+        enlace = post.find("a")
+        if titulo and "previa" in titulo.text.lower():
+            mensaje = f"📅 Próximo partido del Burgos CF (previsto):\n🗞️ {titulo.text.strip()}\n🔗 {enlace['href']}"
+            context.bot.send_message(chat_id=CHANNEL_ID, text=mensaje)
+            return
+    context.bot.send_message(chat_id=CHANNEL_ID, text="❌ No se ha encontrado información de próximo partido.")
 
 def main():
     global bot
@@ -151,7 +81,7 @@ def main():
     dispatcher.add_handler(CommandHandler("start", start))
 
     updater.job_queue.run_repeating(send_news, interval=3600, first=10)
-    updater.job_queue.run_once(seguimiento_partido, when=30)
+    updater.job_queue.run_repeating(send_next_match, interval=14400, first=30)
 
     updater.start_polling()
     updater.idle()
