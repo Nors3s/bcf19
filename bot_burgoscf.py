@@ -55,21 +55,47 @@ def send_news(context: CallbackContext):
     for noticia in noticias:
         context.bot.send_message(chat_id=CHANNEL_ID, text=noticia)
 
-def send_next_match(context: CallbackContext):
-    print("📡 Buscando próximos partidos del Burgos CF (scraping burgosdeporte.com)...")
-    url = "https://www.burgosdeporte.com/index.php/category/burgos-cf/"
-    response = requests.get(url)
-    soup = BeautifulSoup(response.text, "html.parser")
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
-    posibles = soup.find_all("article", limit=5)
-    for post in posibles:
-        titulo = post.find("h2")
-        enlace = post.find("a")
-        if titulo and "previa" in titulo.text.lower():
-            mensaje = f"📅 Próximo partido del Burgos CF (previsto):\n🗞️ {titulo.text.strip()}\n🔗 {enlace['href']}"
-            context.bot.send_message(chat_id=CHANNEL_ID, text=mensaje)
-            return
-    context.bot.send_message(chat_id=CHANNEL_ID, text="❌ No se ha encontrado información de próximo partido.")
+def send_next_match(context: CallbackContext):
+    print("📡 Buscando próximos partidos del Burgos CF (Selenium/Flashscore)...")
+
+    options = Options()
+    options.add_argument("--headless")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+
+    driver = webdriver.Chrome(options=options)
+    driver.get("https://www.flashscore.es/equipo/burgos/8bU7z2d6/")
+
+    try:
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "div.event__match"))
+        )
+
+        partidos = driver.find_elements(By.CSS_SELECTOR, "div.event__match")
+        for p in partidos:
+            estado = p.get_attribute("class")
+            if "event__match--scheduled" in estado:
+                hora = p.find_element(By.CLASS_NAME, "event__time").text
+                local = p.find_element(By.CLASS_NAME, "event__participant--home").text
+                visitante = p.find_element(By.CLASS_NAME, "event__participant--away").text
+                mensaje = f"📅 Próximo partido del Burgos CF:
+🏟️ {local} vs {visitante}
+🕒 Hora: {hora}"
+                context.bot.send_message(chat_id=CHANNEL_ID, text=mensaje)
+                break
+        else:
+            context.bot.send_message(chat_id=CHANNEL_ID, text="❌ No hay partido programado próximamente.")
+
+    except Exception as e:
+        context.bot.send_message(chat_id=CHANNEL_ID, text=f"⚠️ Error al buscar el partido: {e}")
+    finally:
+        driver.quit()
 
 def main():
     global bot
