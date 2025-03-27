@@ -6,6 +6,7 @@ from telegram import Bot
 from telegram.ext import Updater, CommandHandler, CallbackContext
 from telegram.update import Update
 import time
+from datetime import datetime
 
 # Configura variables desde entorno (Railway o Render)
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -25,10 +26,8 @@ SEASON = 2024
 
 # Noticias RSS
 RSS_FEEDS = [
-    "https://www.burgosdeporte.com/?tag=burgoscf",
-    "https://www.burgosconecta.es/burgoscf/"
-    "https://www.diariodeburgos.es/seccion/burgos+cf/f%c3%batbol/deportes"
-    "https://www.revistaforofos.com/category/futbol/burgos-cf/"
+    "https://www.burgosdeporte.com/index.php/feed/",
+    "https://revistaforofos.com/feed/"
 ]
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -63,11 +62,15 @@ def send_news(context: CallbackContext):
         context.bot.send_message(chat_id=CHANNEL_ID, text=noticia)
 
 def get_next_match():
-    url = f"{FOOTBALL_API_URL}/fixtures?team={TEAM_ID_BURGOS}&season={SEASON}&league={LEAGUE_ID}&status=NS"
+    url = f"{FOOTBALL_API_URL}/fixtures?team={TEAM_ID_BURGOS}&season={SEASON}&league={LEAGUE_ID}&next=5"
     response = requests.get(url, headers=headers_api)
     data = response.json()
-    if data["response"]:
-        return data["response"][0]
+    now = datetime.utcnow()
+    for match in data.get("response", []):
+        fecha_str = match["fixture"]["date"]
+        fecha = datetime.strptime(fecha_str, "%Y-%m-%dT%H:%M:%S%z").replace(tzinfo=None)
+        if fecha > now:
+            return match
     return None
 
 # Guarda los eventos ya publicados
@@ -76,12 +79,13 @@ posted_events = set()
 def seguimiento_partido(context: CallbackContext):
     partido = get_next_match()
     if not partido:
-        context.bot.send_message(chat_id=CHANNEL_ID, text="❌ No hay partido programado.")
+        context.bot.send_message(chat_id=CHANNEL_ID, text="❌ No hay partido programado próximamente.")
         return
 
     fixture_id = partido["fixture"]["id"]
     equipos = partido["teams"]
-    info_partido = f"🏟️ {equipos['home']['name']} vs {equipos['away']['name']}"
+    fecha = partido["fixture"]["date"]
+    info_partido = f"🏟️ {equipos['home']['name']} vs {equipos['away']['name']}\n🗓️ {fecha}"
     context.bot.send_message(chat_id=CHANNEL_ID, text=f"🏁 ¡Empieza el seguimiento del próximo partido!\n{info_partido}")
 
     while True:
@@ -125,3 +129,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
