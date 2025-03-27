@@ -87,6 +87,7 @@ def send_next_match(context: CallbackContext):
                 mensaje = f"📅 Próximo partido del Burgos CF:
 🏟️ {local} vs {visitante}
 🕒 Hora: {hora}"
+
                 context.bot.send_message(chat_id=CHANNEL_ID, text=mensaje)
                 break
         else:
