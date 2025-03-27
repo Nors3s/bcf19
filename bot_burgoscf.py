@@ -55,46 +55,45 @@ def send_news(context: CallbackContext):
     for noticia in noticias:
         context.bot.send_message(chat_id=CHANNEL_ID, text=noticia)
 
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+import asyncio
+from playwright.async_api import async_playwright
 
 def send_next_match(context: CallbackContext):
-    print("📡 Buscando próximos partidos del Burgos CF (Selenium/Flashscore)...")
+    asyncio.run(scrape_flashscore(context))
 
-    options = Options()
-    options.add_argument("--headless")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-
-    driver = webdriver.Chrome(options=options)
-    driver.get("https://www.flashscore.com/team/burgos-cf/vTxTEFi6/")
-
+async def scrape_flashscore(context: CallbackContext):
+    print("📡 Buscando próximos partidos del Burgos CF (Playwright/Flashscore)...")
     try:
-        WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "div.event__match"))
-        )
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            page = await browser.new_page()
+            await page.goto("https://www.flashscore.com/team/burgos-cf/vTxTEFi6/")
+            await page.wait_for_selector("div.event__match")
 
-        partidos = driver.find_elements(By.CSS_SELECTOR, "div.event__match")
-        for p in partidos:
-            estado = p.get_attribute("class")
-            if "event__match--scheduled" in estado:
-                hora = p.find_element(By.CLASS_NAME, "event__time").text
-                local = p.find_element(By.CLASS_NAME, "event__participant--home").text
-                visitante = p.find_element(By.CLASS_NAME, "event__participant--away").text
-                mensaje = f"📅 Próximo partido del Burgos CF:\\n🏟️ {local} vs {visitante}\\n🕒 Hora: {hora}"
+            partidos = await page.query_selector_all("div.event__match")
+            for p in partidos:
+                clase = await p.get_attribute("class")
+                if "event__match--scheduled" in clase:
+                    hora = await p.query_selector(".event__time")
+                    local = await p.query_selector(".event__participant--home")
+                    visitante = await p.query_selector(".event__participant--away")
 
-                context.bot.send_message(chat_id=CHANNEL_ID, text=mensaje)
-                break
-        else:
+                    hora_text = await hora.inner_text() if hora else ""
+                    local_text = await local.inner_text() if local else ""
+                    visitante_text = await visitante.inner_text() if visitante else ""
+
+                    mensaje = f"📅 Próximo partido del Burgos CF:
+🏟️ {local_text} vs {visitante_text}
+🕒 Hora: {hora_text}"
+                    await browser.close()
+                    context.bot.send_message(chat_id=CHANNEL_ID, text=mensaje)
+                    return
+
+            await browser.close()
             context.bot.send_message(chat_id=CHANNEL_ID, text="❌ No hay partido programado próximamente.")
 
     except Exception as e:
-        context.bot.send_message(chat_id=CHANNEL_ID, text=f"⚠️ Error al buscar el partido: {e}")
-    finally:
-        driver.quit()
+        context.bot.send_message(chat_id=CHANNEL_ID, text=f"⚠️ Error con Flashscore: {e}")
 
 def main():
     global bot
