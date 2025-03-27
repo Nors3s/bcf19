@@ -8,6 +8,7 @@ from telegram.update import Update
 import time
 from datetime import datetime, timedelta
 import pytz
+import json
 
 # Configura variables desde entorno (Railway o Render)
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -68,6 +69,7 @@ def get_next_match():
     url = f"{FOOTBALL_API_URL}/fixtures?team={TEAM_ID_BURGOS}&season={SEASON}&from={hoy}&limit=50&timezone=UTC"
     response = requests.get(url, headers=headers_api)
     data = response.json()
+    print(json.dumps(data, indent=2))  # Depuración: mostrar toda la respuesta
     partidos = data.get("response", [])
 
     print(f"🔍 Total partidos recibidos: {len(partidos)}")
@@ -144,4 +146,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
