@@ -32,9 +32,8 @@ RSS_FEEDS = [
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-bot = Bot(token=TELEGRAM_TOKEN)
+bot = None
 posted_titles = set()
-
 headers_api = {
     "x-apisports-key": FOOTBALL_API_KEY
 }
@@ -105,6 +104,9 @@ def seguimiento_partido(context: CallbackContext):
         time.sleep(60)
 
 def main():
+    global bot
+    bot = Bot(token=TELEGRAM_TOKEN)
+
     updater = Updater(token=TELEGRAM_TOKEN)
     dispatcher = updater.dispatcher
 
@@ -118,4 +120,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
