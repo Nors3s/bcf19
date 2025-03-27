@@ -25,8 +25,10 @@ SEASON = 2024
 
 # Noticias RSS
 RSS_FEEDS = [
-    "https://www.burgosdeporte.com/index.php/feed/",
-    "https://revistaforofos.com/feed/"
+    "https://www.burgosdeporte.com/?tag=burgoscf",
+    "https://www.burgosconecta.es/burgoscf/"
+    "https://www.diariodeburgos.es/seccion/burgos+cf/f%c3%batbol/deportes"
+    "https://www.revistaforofos.com/category/futbol/burgos-cf/"
 ]
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -46,10 +48,13 @@ def fetch_news():
     for feed_url in RSS_FEEDS:
         feed = feedparser.parse(feed_url)
         for entry in feed.entries[:5]:
-            if entry.title not in posted_titles:
-                mensaje = f"🗞️ {entry.title}\n{entry.link}"
-                mensajes.append(mensaje)
-                posted_titles.add(entry.title)
+            titulo = entry.title.lower()
+            resumen = entry.summary.lower()
+            if "burgos cf" in titulo or "burgos cf" in resumen:
+                if entry.title not in posted_titles:
+                    mensaje = f"🗞️ {entry.title}\n{entry.link}"
+                    mensajes.append(mensaje)
+                    posted_titles.add(entry.title)
     return mensajes
 
 def send_news(context: CallbackContext):
@@ -58,7 +63,7 @@ def send_news(context: CallbackContext):
         context.bot.send_message(chat_id=CHANNEL_ID, text=noticia)
 
 def get_next_match():
-    url = f"{FOOTBALL_API_URL}/fixtures?team={TEAM_ID_BURGOS}&season={SEASON}&league={LEAGUE_ID}&next=1"
+    url = f"{FOOTBALL_API_URL}/fixtures?team={TEAM_ID_BURGOS}&season={SEASON}&league={LEAGUE_ID}&status=NS"
     response = requests.get(url, headers=headers_api)
     data = response.json()
     if data["response"]:
