@@ -22,7 +22,7 @@ if not BESOCCER_API_TOKEN:
     raise ValueError("❌ BESOCCER_API_TOKEN no está definido. Añádelo como variable de entorno.")
 
 BESOCCER_API_URL = "https://apiv2.besoccer.com"
-TEAM_NAME = "burgos"
+TEAM_ID = 6922
 
 # Noticias RSS
 RSS_FEEDS = [
@@ -65,7 +65,7 @@ def get_next_match():
     params = {
         "token": BESOCCER_API_TOKEN,
         "format": "json",
-        "team": TEAM_NAME,
+        "team": TEAM_ID,
         "tz": "Europe/Madrid"
     }
     response = requests.get(url, params=params)
