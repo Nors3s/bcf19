@@ -12,19 +12,19 @@ import json
 
 # Configura variables desde entorno (Railway o Render)
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-BESOCCER_API_TOKEN = os.getenv("BESOCCER_API_TOKEN")
-CHANNEL_ID = "@BurgosCF"  # <-- CAMBIA esto por tu canal real si no lo has hecho
+SPORTMONKS_API_TOKEN = os.getenv("SPORTMONKS_API_TOKEN")
+CHANNEL_ID = "@BurgosCF"
 
 # Validación de variables obligatorias
 print("🔍 TELEGRAM_TOKEN:", "✅" if TELEGRAM_TOKEN else "❌ VACÍO")
-print("🔍 BESOCCER_API_TOKEN:", "✅" if BESOCCER_API_TOKEN else "❌ VACÍO")
+print("🔍 SPORTMONKS_API_TOKEN:", "✅" if SPORTMONKS_API_TOKEN else "❌ VACÍO")
 if not TELEGRAM_TOKEN:
     raise ValueError("❌ TELEGRAM_TOKEN no está definido. Añádelo como variable de entorno.")
-if not BESOCCER_API_TOKEN:
-    raise ValueError("❌ BESOCCER_API_TOKEN no está definido. Añádelo como variable de entorno.")
+if not SPORTMONKS_API_TOKEN:
+    raise ValueError("❌ SPORTMONKS_API_TOKEN no está definido. Añádelo como variable de entorno.")
 
-BESOCCER_API_URL = "https://apiv2.besoccer.com"
-TEAM_ID = 6922
+SPORTMONKS_API_URL = "https://api.sportmonks.com/v3/football"
+TEAM_ID = 1873  # Burgos CF en Sportmonks
 
 # Noticias RSS
 RSS_FEEDS = [
@@ -37,7 +37,6 @@ logger = logging.getLogger(__name__)
 
 bot = None
 posted_titles = set()
-
 
 def start(update: Update, context: CallbackContext):
     update.message.reply_text('¡Bot del Burgos CF en marcha!')
@@ -62,21 +61,22 @@ def send_news(context: CallbackContext):
         context.bot.send_message(chat_id=CHANNEL_ID, text=noticia)
 
 def get_next_match():
-    print("📡 Buscando próximos partidos del Burgos CF (vía BeSoccer)...")
-    url = f"{BESOCCER_API_URL}/matches/team/next/"  # Endpoint genérico, puede necesitar ajuste según la documentación
+    print("📡 Buscando próximos partidos del Burgos CF (vía Sportmonks)...")
+    url = f"{SPORTMONKS_API_URL}/fixtures"
     params = {
-        "token": BESOCCER_API_TOKEN,
-        "format": "json",
-        "team": TEAM_ID,
-        "tz": "Europe/Madrid"
+        "api_token": SPORTMONKS_API_TOKEN,
+        "filters[team_id]": TEAM_ID,
+        "sort": "starting_at",
+        "include": "localTeam,visitorTeam",
+        "per_page": 1
     }
     response = requests.get(url, params=params)
     print(f"🔧 Status code: {response.status_code}")
     data = response.json()
     print(json.dumps(data, indent=2))
 
-    if "matches" in data and data["matches"]:
-        return data["matches"][0]  # Primer partido
+    if "data" in data and data["data"]:
+        return data["data"][0]
     return None
 
 # Guarda los eventos ya publicados
@@ -88,18 +88,15 @@ def seguimiento_partido(context: CallbackContext):
         context.bot.send_message(chat_id=CHANNEL_ID, text="❌ No hay partido programado próximamente.")
         return
 
-    local = partido['local']['name']
-    visitante = partido['visitor']['name']
-    fecha_str = partido['date']
-
-    fecha_obj = datetime.strptime(fecha_str, "%Y-%m-%d %H:%M:%S")
+    local = partido['localTeam']['data']['name']
+    visitante = partido['visitorTeam']['data']['name']
+    fecha_str = partido['starting_at']
+    fecha_obj = datetime.strptime(fecha_str, "%Y-%m-%dT%H:%M:%S%z")
     fecha_madrid = fecha_obj.astimezone(pytz.timezone("Europe/Madrid"))
     fecha_formateada = fecha_madrid.strftime("%A, %d de %B a las %H:%M")
 
     info_partido = f"🏟️ {local} vs {visitante}\n🗓️ {fecha_formateada} (hora española)"
     context.bot.send_message(chat_id=CHANNEL_ID, text=f"🏁 ¡Empieza el seguimiento del próximo partido!\n{info_partido}")
-
-    # ⚠️ Aquí puedes añadir seguimiento de eventos si BeSoccer lo permite en el plan
 
 def main():
     global bot
