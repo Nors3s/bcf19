@@ -62,10 +62,9 @@ def send_news(context: CallbackContext):
 
 def get_next_match():
     print("📡 Buscando próximos partidos del Burgos CF (vía Sportmonks)...")
-    url = f"{SPORTMONKS_API_URL}/fixtures"
+    url = f"{SPORTMONKS_API_URL}/teams/{TEAM_ID}/fixtures"
     params = {
         "api_token": SPORTMONKS_API_TOKEN,
-        "filters[team_id]": TEAM_ID,
         "sort": "starting_at",
         "include": "localTeam,visitorTeam",
         "per_page": 1
@@ -88,6 +87,7 @@ def seguimiento_partido(context: CallbackContext):
         context.bot.send_message(chat_id=CHANNEL_ID, text="❌ No hay partido programado próximamente.")
         return
 
+    fixture_id = partido['id']
     local = partido['localTeam']['data']['name']
     visitante = partido['visitorTeam']['data']['name']
     fecha_str = partido['starting_at']
@@ -95,8 +95,53 @@ def seguimiento_partido(context: CallbackContext):
     fecha_madrid = fecha_obj.astimezone(pytz.timezone("Europe/Madrid"))
     fecha_formateada = fecha_madrid.strftime("%A, %d de %B a las %H:%M")
 
-    info_partido = f"🏟️ {local} vs {visitante}\n🗓️ {fecha_formateada} (hora española)"
-    context.bot.send_message(chat_id=CHANNEL_ID, text=f"🏁 ¡Empieza el seguimiento del próximo partido!\n{info_partido}")
+    info_partido = f"🏟️ {local} vs {visitante}
+🗓️ {fecha_formateada} (hora española)"
+    context.bot.send_message(chat_id=CHANNEL_ID, text=f"🏁 ¡Empieza el seguimiento del próximo partido!
+{info_partido}")
+
+    # Seguimiento en tiempo real (eventos)
+    partido_finalizado = False
+    while not partido_finalizado:
+        eventos_url = f"{SPORTMONKS_API_URL}/fixtures/{fixture_id}?include=events"
+        params = {"api_token": SPORTMONKS_API_TOKEN}
+        res = requests.get(eventos_url, params=params)
+        data = res.json()
+
+        # Verificar si el partido ha finalizado
+        status = data.get("data", {}).get("status")
+        if status and status.lower() in ["ft", "fulltime", "ended"]:
+            marcador_local = data["data"].get("scores", {}).get("local_score", "?")
+            marcador_visitante = data["data"].get("scores", {}).get("visitor_score", "?")
+            resultado = f"⏱️ Final del partido: {local} {marcador_local} - {marcador_visitante} {visitante}"
+            context.bot.send_message(chat_id=CHANNEL_ID, text=resultado)
+            break
+
+        if "data" in data and "events" in data["data"] and "data" in data["data"]["events"]:
+            for evento in data["data"]["events"]["data"]:
+                event_id = evento.get("id")
+                if event_id in posted_events:
+                    continue
+                posted_events.add(event_id)
+
+                tipo = evento.get("type")
+                jugador = evento.get("player_name", "")
+                minuto = evento.get("minute", "")
+                texto = ""
+
+                if tipo == "goal":
+                    texto = f"⚽️ ¡Gol de {jugador}! ({minuto}')"
+                elif tipo == "yellowcard":
+                    texto = f"🟨 Tarjeta amarilla para {jugador} ({minuto}')"
+                elif tipo == "redcard":
+                    texto = f"🟥 Tarjeta roja para {jugador} ({minuto}')"
+                elif tipo == "substitution":
+                    texto = f"🔁 Cambio: {jugador} entra ({minuto}')"
+
+                if texto:
+                    context.bot.send_message(chat_id=CHANNEL_ID, text=texto)
+
+        time.sleep(60)
 
 def main():
     global bot
