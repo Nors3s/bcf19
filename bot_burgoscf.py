@@ -7,10 +7,16 @@ from telegram.ext import Updater, CommandHandler, CallbackContext
 from telegram.update import Update
 import time
 
-# Configura variables desde entorno (Render)
+# Configura variables desde entorno (Railway o Render)
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 FOOTBALL_API_KEY = os.getenv("FOOTBALL_API_KEY")
 CHANNEL_ID = "@BurgosCF"  # <-- CAMBIA esto por tu canal real si no lo has hecho
+
+# Validación de variables obligatorias
+if not TELEGRAM_TOKEN:
+    raise ValueError("❌ TELEGRAM_TOKEN no está definido. Añádelo como variable de entorno.")
+if not FOOTBALL_API_KEY:
+    raise ValueError("❌ FOOTBALL_API_KEY no está definido. Añádelo como variable de entorno.")
 
 FOOTBALL_API_URL = "https://v3.football.api-sports.io"
 TEAM_ID_BURGOS = 2826  # ID del Burgos CF en API-Football (LaLiga SmartBank)
@@ -112,3 +118,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
