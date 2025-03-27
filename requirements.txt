@@ -3,4 +3,6 @@ feedparser
 requests
 beautifulsoup4
 selenium
+playwright
 pytz
+
