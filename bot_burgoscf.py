@@ -70,8 +70,7 @@ def get_next_match():
     data = response.json()
     partidos = data.get("response", [])
 
-    # Filtrar por estados válidos (NS = Not Started, TBD = To Be Determined)
-        print(f"🔍 Total partidos recibidos: {len(partidos)}")
+    print(f"🔍 Total partidos recibidos: {len(partidos)}")
     for p in partidos:
         estado = p['fixture']['status']['short']
         fecha = p['fixture']['date']
