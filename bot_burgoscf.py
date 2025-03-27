@@ -62,7 +62,7 @@ def send_news(context: CallbackContext):
 
 def get_next_match():
     print("📡 Buscando próximos partidos del Burgos CF (vía Sportmonks)...")
-    url = f"{SPORTMONKS_API_URL}/teams/{TEAM_ID}/fixtures"
+    url = f"{SPORTMONKS_API_URL}/fixtures/by/team/{TEAM_ID}"
     params = {
         "api_token": SPORTMONKS_API_TOKEN,
         "sort": "starting_at",
