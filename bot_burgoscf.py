@@ -6,7 +6,8 @@ from telegram import Bot
 from telegram.ext import Updater, CommandHandler, CallbackContext
 from telegram.update import Update
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
+import pytz
 
 # Configura variables desde entorno (Railway o Render)
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -62,15 +63,14 @@ def send_news(context: CallbackContext):
         context.bot.send_message(chat_id=CHANNEL_ID, text=noticia)
 
 def get_next_match():
-    url = f"{FOOTBALL_API_URL}/fixtures?team={TEAM_ID_BURGOS}&season={SEASON}&league={LEAGUE_ID}&next=5"
+    hoy = datetime.utcnow().strftime("%Y-%m-%d")
+    url = f"{FOOTBALL_API_URL}/fixtures?team={TEAM_ID_BURGOS}&season={SEASON}&league={LEAGUE_ID}&from={hoy}&timezone=UTC"
     response = requests.get(url, headers=headers_api)
     data = response.json()
-    now = datetime.utcnow()
-    for match in data.get("response", []):
-        fecha_str = match["fixture"]["date"]
-        fecha = datetime.strptime(fecha_str, "%Y-%m-%dT%H:%M:%S%z").replace(tzinfo=None)
-        if fecha > now:
-            return match
+    partidos = data.get("response", [])
+    if partidos:
+        partidos_ordenados = sorted(partidos, key=lambda x: x["fixture"]["date"])
+        return partidos_ordenados[0]
     return None
 
 # Guarda los eventos ya publicados
@@ -84,8 +84,11 @@ def seguimiento_partido(context: CallbackContext):
 
     fixture_id = partido["fixture"]["id"]
     equipos = partido["teams"]
-    fecha = partido["fixture"]["date"]
-    info_partido = f"🏟️ {equipos['home']['name']} vs {equipos['away']['name']}\n🗓️ {fecha}"
+    fecha_utc = datetime.strptime(partido["fixture"]["date"], "%Y-%m-%dT%H:%M:%S%z")
+    fecha_madrid = fecha_utc.astimezone(pytz.timezone("Europe/Madrid"))
+    fecha_formateada = fecha_madrid.strftime("%A, %d de %B a las %H:%M")
+
+    info_partido = f"🏟️ {equipos['home']['name']} vs {equipos['away']['name']}\n🗓️ {fecha_formateada} (hora española)"
     context.bot.send_message(chat_id=CHANNEL_ID, text=f"🏁 ¡Empieza el seguimiento del próximo partido!\n{info_partido}")
 
     while True:
