@@ -95,6 +95,11 @@ def seguimiento_partido(context: CallbackContext):
     fecha_madrid = fecha_obj.astimezone(pytz.timezone("Europe/Madrid"))
     fecha_formateada = fecha_madrid.strftime("%A, %d de %B a las %H:%M")
 
+    info_partido = f"🏟️ {local} vs {visitante}
+🗓️ {fecha_formateada} (hora española)"
+    context.bot.send_message(chat_id=CHANNEL_ID, text=f"🏁 ¡Empieza el seguimiento del próximo partido!
+{info_partido}")
+
 info_partido = f"🏟️ {local} vs {visitante}\\n🗓️ {fecha_formateada} (hora española)"
 
 context.bot.send_message(chat_id=CHANNEL_ID, text=f"🏁 ¡Empieza el seguimiento del próximo partido!\\n{info_partido}")
