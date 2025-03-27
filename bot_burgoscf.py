@@ -63,6 +63,7 @@ def send_news(context: CallbackContext):
         context.bot.send_message(chat_id=CHANNEL_ID, text=noticia)
 
 def get_next_match():
+    print("📡 Buscando próximos partidos del Burgos CF...")
     hoy = datetime.utcnow().strftime("%Y-%m-%d")
     url = f"{FOOTBALL_API_URL}/fixtures?team={TEAM_ID_BURGOS}&season={SEASON}&league={LEAGUE_ID}&from={hoy}&limit=50&timezone=UTC"
     response = requests.get(url, headers=headers_api)
@@ -70,6 +71,14 @@ def get_next_match():
     partidos = data.get("response", [])
 
     # Filtrar por estados válidos (NS = Not Started, TBD = To Be Determined)
+        print(f"🔍 Total partidos recibidos: {len(partidos)}")
+    for p in partidos:
+        estado = p['fixture']['status']['short']
+        fecha = p['fixture']['date']
+        local = p['teams']['home']['name']
+        visitante = p['teams']['away']['name']
+        print(f" - {fecha} | {local} vs {visitante} | Estado: {estado}")
+
     futuros = [p for p in partidos if p["fixture"]["status"]["short"] in ["NS", "TBD"]]
 
     if futuros:
