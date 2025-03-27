@@ -70,7 +70,7 @@ def send_next_match(context: CallbackContext):
     options.add_argument("--disable-dev-shm-usage")
 
     driver = webdriver.Chrome(options=options)
-    driver.get("https://www.flashscore.es/equipo/burgos/8bU7z2d6/")
+    driver.get("https://www.flashscore.com/team/burgos-cf/vTxTEFi6/")
 
     try:
         WebDriverWait(driver, 10).until(
