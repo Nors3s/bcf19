@@ -67,8 +67,10 @@ def fetch_bluesky_posts():
         "limit": 10
     }
     headers = {
+        "Authorization": f"Bearer {BLUESKY_TOKEN}",
         "Accept": "application/json"
     }
+    response = requests.get(url, params=params, headers=headers)
     try:
         response = requests.get(url, params=params, headers=headers)
         logger.info("Bluesky response status: %s", response.status_code)
