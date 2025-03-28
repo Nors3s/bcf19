@@ -11,16 +11,21 @@ import json
 import asyncio
 from playwright.async_api import async_playwright
 
-# Configura variables desde entorno
+# --- Configuración de variables de entorno ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID", "@BurgosCF")
-BLUESKY_TOKEN = os.getenv("BLUESKY_TOKEN")  # Si no tienes token, la integración de Bluesky no enviará posts
+# Token de Bluesky (Access Token) y Refresh Token
+BLUESKY_TOKEN = os.getenv("BLUESKY_TOKEN")
+BLUESKY_REFRESH_TOKEN = os.getenv("BLUESKY_REFRESH_TOKEN")
 
-# Validación de variables obligatorias para Telegram
-print("🔍 TELEGRAM_TOKEN:", "✅" if TELEGRAM_TOKEN else "❌ VACÍO")
 if not TELEGRAM_TOKEN:
-    raise ValueError("❌ TELEGRAM_TOKEN no está definido. Añádelo como variable de entorno.")
+    raise ValueError("❌ TELEGRAM_TOKEN no está definido.")
+if not BLUESKY_TOKEN:
+    logging.warning("BLUESKY_TOKEN no está definido; la integración de Bluesky no funcionará.")
+if not BLUESKY_REFRESH_TOKEN:
+    logging.warning("BLUESKY_REFRESH_TOKEN no está definido; no se podrá renovar el token automáticamente.")
 
+# --- Configuración de logging ---
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -28,38 +33,39 @@ bot = None
 posted_titles = set()
 posted_bluesky_ids = set()
 
-# Función de inicio para Telegram
-def start(update: Update, context: CallbackContext):
-    update.message.reply_text('¡Bot del Burgos CF en marcha!')
+# Variable global para el token actual de Bluesky
+current_bluesky_token = BLUESKY_TOKEN
 
-# Función para obtener noticias desde feeds RSS
-def fetch_news():
-    mensajes = []
-    RSS_FEEDS = [
-        "https://www.burgosdeporte.com/index.php/feed/",
-        "https://revistaforofos.com/feed/",
-        "https://www.burgosconecta.es/burgoscf/rss",
-        "https://www.diariodeburgos.es/seccion/burgos+cf/f%C3%BAtbol/deportes/rss"
-    ]
-    for feed_url in RSS_FEEDS:
-        feed = feedparser.parse(feed_url)
-        for entry in feed.entries[:5]:
-            titulo = entry.title.lower()
-            resumen = entry.summary.lower()
-            if "burgos cf" in titulo or "burgos cf" in resumen:
-                if entry.title not in posted_titles:
-                    mensaje = f"🗞️ {entry.title}\n{entry.link}"
-                    mensajes.append(mensaje)
-                    posted_titles.add(entry.title)
-    return mensajes
+# --- Función para renovar el token de Bluesky ---
+def refresh_bluesky_token():
+    global current_bluesky_token, BLUESKY_REFRESH_TOKEN
+    refresh_url = "https://bsky.social/xrpc/com.atproto.server.refreshSession"  # Verifica este endpoint
+    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    payload = {
+        "refreshToken": BLUESKY_REFRESH_TOKEN
+    }
+    try:
+        response = requests.post(refresh_url, headers=headers, json=payload)
+        if response.status_code == 200:
+            data = response.json()
+            new_access = data.get("accessJwt")
+            new_refresh = data.get("refreshJwt")
+            if new_access:
+                current_bluesky_token = new_access
+                BLUESKY_REFRESH_TOKEN = new_refresh  # Actualiza el refresh token, si se proporciona
+                logger.info("Token de Bluesky renovado correctamente.")
+                return True
+            else:
+                logger.error("No se recibió 'accessJwt' en la respuesta de renovación.")
+                return False
+        else:
+            logger.error("Error al renovar token de Bluesky: %s %s", response.status_code, response.text)
+            return False
+    except Exception as e:
+        logger.error("Excepción al renovar token de Bluesky: %s", e)
+        return False
 
-# Función para enviar noticias a Telegram
-def send_news(context: CallbackContext):
-    noticias = fetch_news()
-    for noticia in noticias:
-        context.bot.send_message(chat_id=CHANNEL_ID, text=noticia)
-
-# Función para obtener posts de Bluesky
+# --- Función para obtener posts de Bluesky ---
 def fetch_bluesky_posts():
     url = "https://bsky.social/xrpc/app.bsky.feed.getActorTimeline"
     params = {
@@ -67,25 +73,31 @@ def fetch_bluesky_posts():
         "limit": 10
     }
     headers = {
-        "Authorization": f"Bearer {BLUESKY_TOKEN}",
+        "Authorization": f"Bearer {current_bluesky_token}",
         "Accept": "application/json"
     }
-    response = requests.get(url, params=params, headers=headers)
     try:
         response = requests.get(url, params=params, headers=headers)
         logger.info("Bluesky response status: %s", response.status_code)
         data = response.json()
         logger.info("Bluesky response JSON: %s", json.dumps(data, indent=2))
     except Exception as ex:
-        logger.error("Error obteniendo o parseando Bluesky JSON: %s", ex)
+        logger.error("Error al obtener posts de Bluesky: %s", ex)
         return []
+    # Si se recibe un error de token expirado, renovar y reintentar
+    if response.status_code == 401 and data.get("error") == "ExpiredToken":
+        logger.warning("Token expirado, renovando...")
+        if refresh_bluesky_token():
+            return fetch_bluesky_posts()  # reintentar con el nuevo token
+        else:
+            return []
     if "feed" in data:
         return data["feed"]
     else:
-        logger.warning("La respuesta de Bluesky no contiene la clave 'feed'")
-    return []
+        logger.warning("La respuesta de Bluesky no contiene 'feed'.")
+        return []
 
-# Función para enviar posts de Bluesky a Telegram
+# --- Función para enviar posts de Bluesky a Telegram ---
 def send_bluesky_posts(context: CallbackContext):
     posts = fetch_bluesky_posts()
     if not posts:
@@ -106,45 +118,72 @@ def send_bluesky_posts(context: CallbackContext):
         context.bot.send_message(chat_id=CHANNEL_ID, text=message)
         posted_bluesky_ids.add(post_id)
 
-# Función para obtener la programación del próximo partido (se usa Flashscore con Playwright)
-def send_next_match(context: CallbackContext):
-    asyncio.run(scrape_flashscore(context))
+# --- Función para obtener noticias desde feeds RSS ---
+def fetch_news():
+    mensajes = []
+    RSS_FEEDS = [
+        "https://www.burgosdeporte.com/index.php/feed/",
+        "https://revistaforofos.com/feed/",
+        "https://www.burgosconecta.es/burgoscf/rss",
+        "https://www.diariodeburgos.es/seccion/burgos+cf/f%C3%BAtbol/deportes/rss"
+    ]
+    for feed_url in RSS_FEEDS:
+        feed = feedparser.parse(feed_url)
+        for entry in feed.entries[:5]:
+            titulo = entry.title.lower()
+            resumen = entry.summary.lower()
+            if "burgos cf" in titulo or "burgos cf" in resumen:
+                if entry.title not in posted_titles:
+                    mensaje = f"🗞️ {entry.title}\n{entry.link}"
+                    mensajes.append(mensaje)
+                    posted_titles.add(entry.title)
+    return mensajes
 
-async def scrape_flashscore(context: CallbackContext):
-    print("📡 Buscando próximos partidos del Burgos CF (Playwright/Flashscore)...")
+# --- Función para enviar noticias a Telegram y Bluesky ---
+def send_news(context: CallbackContext):
+    noticias = fetch_news()
+    for noticia in noticias:
+        context.bot.send_message(chat_id=CHANNEL_ID, text=noticia)
+        send_to_bluesky(noticia)
+
+# --- Función para enviar un mensaje a Bluesky ---
+def send_to_bluesky(message: str):
+    if not BLUESKY_TOKEN:
+        logger.warning("BLUESKY_TOKEN no definido; no se enviará a Bluesky.")
+        return
+    url = "https://bsky.social/xrpc/app.bsky.feed.post"
+    headers = {
+        "Authorization": f"Bearer {current_bluesky_token}",
+        "Content-Type": "application/json"
+    }
+    payload = {"text": message}
     try:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            page = await browser.new_page()
-            await page.goto("https://www.flashscore.com/team/burgos-cf/vTxTEFi6/")
-            await page.wait_for_selector("div.event__match", timeout=10000)
-            
-            partidos = await page.query_selector_all("div.event__match")
-            for elem in partidos:
-                clase = await elem.get_attribute("class")
-                if "event__match--scheduled" in clase:
-                    participantes = await elem.query_selector_all(".event__participant")
-                    if len(participantes) >= 2:
-                        home_text = (await participantes[0].inner_text()).strip()
-                        away_text = (await participantes[1].inner_text()).strip()
-                    else:
-                        home_text, away_text = "", ""
-                    
-                    hora_elem = await elem.query_selector(".event__time")
-                    hora_text = (await hora_elem.inner_text()).strip() if hora_elem else ""
-                    
-                    # Solo se publica si se tienen todos los datos
-                    if home_text and away_text and hora_text:
-                        mensaje = f"📅 Próximo partido del Burgos CF:\n🏟️ {home_text} vs {away_text}\n🕒 Hora: {hora_text}"
-                        await browser.close()
-                        context.bot.send_message(chat_id=CHANNEL_ID, text=mensaje)
-                        return
-            
-            await browser.close()
-            print("No se encontró información completa de próximo partido en Flashscore.")
+        response = requests.post(url, headers=headers, json=payload)
+        if response.status_code == 200:
+            logger.info("Mensaje enviado a Bluesky correctamente.")
+        elif response.status_code == 401 and response.json().get("error") == "ExpiredToken":
+            logger.warning("Token expirado al enviar mensaje a Bluesky, renovando...")
+            if refresh_bluesky_token():
+                # Reintentar el envío
+                headers["Authorization"] = f"Bearer {current_bluesky_token}"
+                response = requests.post(url, headers=headers, json=payload)
+                if response.status_code == 200:
+                    logger.info("Mensaje enviado a Bluesky tras renovación.")
+                else:
+                    logger.error("Error tras renovación: %s %s", response.status_code, response.text)
+            else:
+                logger.error("No se pudo renovar el token de Bluesky.")
+        else:
+            logger.error("Error enviando mensaje a Bluesky: %s %s", response.status_code, response.text)
     except Exception as e:
-        context.bot.send_message(chat_id=CHANNEL_ID, text=f"⚠️ Error con Flashscore: {e}")
+        logger.error("Excepción al enviar mensaje a Bluesky: %s", e)
 
+# --- Función para la programación de próximos partidos (se mantiene, pero se puede omitir si no se desea) ---
+def send_next_match(context: CallbackContext):
+    # En este ejemplo, se omite la funcionalidad de próximos partidos.
+    pass
+
+# --- Función principal ---
 def main():
     global bot
     bot = Bot(token=TELEGRAM_TOKEN)
@@ -158,7 +197,7 @@ def main():
     updater.job_queue.run_repeating(send_news, interval=3600, first=10)
     # Programa el envío de posts de Bluesky cada 1 hora
     updater.job_queue.run_repeating(send_bluesky_posts, interval=3600, first=20)
-    # Programa el envío del próximo partido cada 4 horas
+    # Programa el envío del próximo partido cada 4 horas (actualmente deshabilitado)
     updater.job_queue.run_repeating(send_next_match, interval=14400, first=30)
     
     updater.start_polling()
