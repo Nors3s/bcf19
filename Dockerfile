@@ -21,6 +21,9 @@ RUN apt-get update && apt-get install -y \
     nodejs \
     && rm -rf /var/lib/apt/lists/*
 
+# Crea un enlace simbólico para que "python" apunte a "python3"
+RUN ln -s /usr/bin/python3 /usr/bin/python
+
 # Establece el directorio de trabajo en /app
 WORKDIR /app
 
