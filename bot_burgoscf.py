@@ -14,18 +14,17 @@ from playwright.async_api import async_playwright
 # --- Configuración de variables de entorno ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID", "@BurgosCF")
-# Token de Bluesky (Access Token) y Refresh Token
-BLUESKY_TOKEN = os.getenv("BLUESKY_TOKEN")
-BLUESKY_REFRESH_TOKEN = os.getenv("BLUESKY_REFRESH_TOKEN")
+BLUESKY_TOKEN = os.getenv("BLUESKY_TOKEN")            # Access Token para Bluesky
+BLUESKY_REFRESH_TOKEN = os.getenv("BLUESKY_REFRESH_TOKEN")  # Refresh Token para renovar el token
 
+print("🔍 TELEGRAM_TOKEN:", "✅" if TELEGRAM_TOKEN else "❌ VACÍO")
 if not TELEGRAM_TOKEN:
-    raise ValueError("❌ TELEGRAM_TOKEN no está definido.")
-if not BLUESKY_TOKEN:
-    logging.warning("BLUESKY_TOKEN no está definido; la integración de Bluesky no funcionará.")
+    raise ValueError("❌ TELEGRAM_TOKEN no está definido. Añádelo como variable de entorno.")
+
 if not BLUESKY_REFRESH_TOKEN:
     logging.warning("BLUESKY_REFRESH_TOKEN no está definido; no se podrá renovar el token automáticamente.")
 
-# --- Configuración de logging ---
+# --- Configuración del logging ---
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -36,14 +35,16 @@ posted_bluesky_ids = set()
 # Variable global para el token actual de Bluesky
 current_bluesky_token = BLUESKY_TOKEN
 
+# --- Función de inicio para Telegram ---
+def start(update: Update, context: CallbackContext):
+    update.message.reply_text("¡Bot del Burgos CF en marcha!")
+
 # --- Función para renovar el token de Bluesky ---
 def refresh_bluesky_token():
     global current_bluesky_token, BLUESKY_REFRESH_TOKEN
-    refresh_url = "https://bsky.social/xrpc/com.atproto.server.refreshSession"  # Verifica este endpoint
+    refresh_url = "https://bsky.social/xrpc/com.atproto.server.refreshSession"  # Verifica este endpoint en la documentación
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
-    payload = {
-        "refreshToken": BLUESKY_REFRESH_TOKEN
-    }
+    payload = {"refreshToken": BLUESKY_REFRESH_TOKEN}
     try:
         response = requests.post(refresh_url, headers=headers, json=payload)
         if response.status_code == 200:
@@ -52,7 +53,7 @@ def refresh_bluesky_token():
             new_refresh = data.get("refreshJwt")
             if new_access:
                 current_bluesky_token = new_access
-                BLUESKY_REFRESH_TOKEN = new_refresh  # Actualiza el refresh token, si se proporciona
+                BLUESKY_REFRESH_TOKEN = new_refresh  # Actualiza el refresh token si se proporciona
                 logger.info("Token de Bluesky renovado correctamente.")
                 return True
             else:
@@ -68,10 +69,7 @@ def refresh_bluesky_token():
 # --- Función para obtener posts de Bluesky ---
 def fetch_bluesky_posts():
     url = "https://bsky.social/xrpc/app.bsky.feed.getActorTimeline"
-    params = {
-        "actor": "burgoscf.bsky.social",
-        "limit": 10
-    }
+    params = {"actor": "burgoscf.bsky.social", "limit": 10}
     headers = {
         "Authorization": f"Bearer {current_bluesky_token}",
         "Accept": "application/json"
@@ -84,17 +82,17 @@ def fetch_bluesky_posts():
     except Exception as ex:
         logger.error("Error al obtener posts de Bluesky: %s", ex)
         return []
-    # Si se recibe un error de token expirado, renovar y reintentar
+    # Si el token ha expirado, se renueva y se reintenta
     if response.status_code == 401 and data.get("error") == "ExpiredToken":
         logger.warning("Token expirado, renovando...")
         if refresh_bluesky_token():
-            return fetch_bluesky_posts()  # reintentar con el nuevo token
+            return fetch_bluesky_posts()
         else:
             return []
     if "feed" in data:
         return data["feed"]
     else:
-        logger.warning("La respuesta de Bluesky no contiene 'feed'.")
+        logger.warning("La respuesta de Bluesky no contiene 'feed'")
         return []
 
 # --- Función para enviar posts de Bluesky a Telegram ---
@@ -139,7 +137,7 @@ def fetch_news():
                     posted_titles.add(entry.title)
     return mensajes
 
-# --- Función para enviar noticias a Telegram y Bluesky ---
+# --- Función para enviar noticias a Telegram y a Bluesky ---
 def send_news(context: CallbackContext):
     noticias = fetch_news()
     for noticia in noticias:
@@ -164,7 +162,6 @@ def send_to_bluesky(message: str):
         elif response.status_code == 401 and response.json().get("error") == "ExpiredToken":
             logger.warning("Token expirado al enviar mensaje a Bluesky, renovando...")
             if refresh_bluesky_token():
-                # Reintentar el envío
                 headers["Authorization"] = f"Bearer {current_bluesky_token}"
                 response = requests.post(url, headers=headers, json=payload)
                 if response.status_code == 200:
@@ -178,9 +175,9 @@ def send_to_bluesky(message: str):
     except Exception as e:
         logger.error("Excepción al enviar mensaje a Bluesky: %s", e)
 
-# --- Función para la programación de próximos partidos (se mantiene, pero se puede omitir si no se desea) ---
+# --- Función para la programación del próximo partido (se ha deshabilitado) ---
 def send_next_match(context: CallbackContext):
-    # En este ejemplo, se omite la funcionalidad de próximos partidos.
+    # Funcionalidad de próximos partidos deshabilitada
     pass
 
 # --- Función principal ---
@@ -197,7 +194,7 @@ def main():
     updater.job_queue.run_repeating(send_news, interval=3600, first=10)
     # Programa el envío de posts de Bluesky cada 1 hora
     updater.job_queue.run_repeating(send_bluesky_posts, interval=3600, first=20)
-    # Programa el envío del próximo partido cada 4 horas (actualmente deshabilitado)
+    # Programa el envío del próximo partido cada 4 horas (funcionalidad deshabilitada)
     updater.job_queue.run_repeating(send_next_match, interval=14400, first=30)
     
     updater.start_polling()
