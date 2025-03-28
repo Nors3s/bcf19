@@ -14,9 +14,9 @@ from playwright.async_api import async_playwright
 # Configura variables desde entorno
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID", "@BurgosCF")
-BLUESKY_TOKEN = os.getenv("BLUESKY_TOKEN")  # Token para publicar en Bluesky
+BLUESKY_TOKEN = os.getenv("BLUESKY_TOKEN")  # Si mantienes la integración con Bluesky
 
-# Validación de variables obligatorias
+# Validación de variables obligatorias para Telegram
 print("🔍 TELEGRAM_TOKEN:", "✅" if TELEGRAM_TOKEN else "❌ VACÍO")
 if not TELEGRAM_TOKEN:
     raise ValueError("❌ TELEGRAM_TOKEN no está definido. Añádelo como variable de entorno.")
@@ -26,7 +26,6 @@ logger = logging.getLogger(__name__)
 
 bot = None
 posted_titles = set()
-# Usamos posted_bluesky_ids para evitar duplicados si fuera necesario (en este ejemplo no se usa para publicar, solo para evitar reenvíos)
 posted_bluesky_ids = set()
 
 # Función de inicio para Telegram
@@ -54,14 +53,14 @@ def fetch_news():
                     posted_titles.add(entry.title)
     return mensajes
 
-# Función para enviar noticias a Telegram y Bluesky
+# Función para enviar noticias a Telegram y a Bluesky
 def send_news(context: CallbackContext):
     noticias = fetch_news()
     for noticia in noticias:
         context.bot.send_message(chat_id=CHANNEL_ID, text=noticia)
         send_to_bluesky(noticia)
 
-# Función para enviar un mensaje a Bluesky mediante la API de Bluesky
+# Función para enviar un mensaje a Bluesky mediante su API (si BLUESKY_TOKEN está definido)
 def send_to_bluesky(message: str):
     if not BLUESKY_TOKEN:
         logger.warning("BLUESKY_TOKEN no definido; no se enviará a Bluesky.")
@@ -83,8 +82,7 @@ def send_to_bluesky(message: str):
     except Exception as e:
         logger.error("Excepción al enviar mensaje a Bluesky: %s", e)
 
-# Función para obtener la programación del próximo partido
-# (En este ejemplo, se mantiene la integración con Flashscore para extraer la info)
+# Función para obtener la programación del próximo partido usando Playwright (scraping de Flashscore)
 def send_next_match(context: CallbackContext):
     asyncio.run(scrape_flashscore(context))
 
@@ -96,29 +94,37 @@ async def scrape_flashscore(context: CallbackContext):
             page = await browser.new_page()
             # Usamos la URL de Flashscore para el Burgos CF
             await page.goto("https://www.flashscore.com/team/burgos-cf/vTxTEFi6/")
-            await page.wait_for_selector("div.event__match")
+            await page.wait_for_selector("div.event__match", timeout=10000)
             
             partidos = await page.query_selector_all("div.event__match")
             for elem in partidos:
                 clase = await elem.get_attribute("class")
                 if "event__match--scheduled" in clase:
+                    # Obtenemos los participantes usando un selector general
+                    participantes = await elem.query_selector_all(".event__participant")
+                    if len(participantes) >= 2:
+                        home_text = (await participantes[0].inner_text()).strip()
+                        away_text = (await participantes[1].inner_text()).strip()
+                    else:
+                        home_text, away_text = "", ""
+                    
+                    # Obtener la hora
                     hora_elem = await elem.query_selector(".event__time")
-                    local_elem = await elem.query_selector(".event__participant--home")
-                    visitante_elem = await elem.query_selector(".event__participant--away")
+                    hora_text = (await hora_elem.inner_text()).strip() if hora_elem else ""
                     
-                    hora_text = await hora_elem.inner_text() if hora_elem else ""
-                    local_text = await local_elem.inner_text() if local_elem else ""
-                    visitante_text = await visitante_elem.inner_text() if visitante_elem else ""
+                    # Solo enviar mensaje si se tienen todos los datos completos
+                    if not home_text or not away_text or not hora_text:
+                        continue
                     
-                    mensaje = f"📅 Próximo partido del Burgos CF:\n🏟️ {local_text} vs {visitante_text}\n🕒 Hora: {hora_text}"
+                    mensaje = f"📅 Próximo partido del Burgos CF:\n🏟️ {home_text} vs {away_text}\n🕒 Hora: {hora_text}"
                     await browser.close()
                     context.bot.send_message(chat_id=CHANNEL_ID, text=mensaje)
                     send_to_bluesky(mensaje)
                     return
             
             await browser.close()
-            # Si no se encuentra partido, no se envía mensaje (según tu solicitud)
-            logger.info("No se encontró información de próximo partido en Flashscore.")
+            # Si no se encuentra información completa, no se envía ningún mensaje.
+            print("No se encontró información completa de próximo partido en Flashscore.")
     except Exception as e:
         context.bot.send_message(chat_id=CHANNEL_ID, text=f"⚠️ Error con Flashscore: {e}")
         send_to_bluesky(f"⚠️ Error con Flashscore: {e}")
@@ -134,9 +140,8 @@ def main():
     
     # Programa el envío de noticias cada 1 hora
     updater.job_queue.run_repeating(send_news, interval=3600, first=10)
-    # Programa el envío de posts de Bluesky (ahora ya no se recuperan, sino que se envía lo que se publique en Telegram)
-    # En este ejemplo, la integración con Bluesky se realiza en send_news y send_next_match, enviando el mismo mensaje.
-    
+    # Programa el envío de posts de Bluesky cada 1 hora
+    updater.job_queue.run_repeating(send_bluesky_posts, interval=3600, first=20)
     # Programa el envío del próximo partido cada 4 horas
     updater.job_queue.run_repeating(send_next_match, interval=14400, first=30)
     
