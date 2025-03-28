@@ -58,7 +58,7 @@ def send_news(context: CallbackContext):
     for noticia in noticias:
         context.bot.send_message(chat_id=CHANNEL_ID, text=noticia)
 
-# Integración con Bluesky: obtener posts desde la cuenta de Bluesky
+# Función para obtener posts de Bluesky
 def fetch_bluesky_posts():
     url = "https://bsky.social/xrpc/app.bsky.feed.getActorTimeline"
     params = {
@@ -68,23 +68,46 @@ def fetch_bluesky_posts():
     headers = {
         "Accept": "application/json"
     }
-    response = requests.get(url, params=params, headers=headers)
-    if response.status_code == 200:
+    try:
+        response = requests.get(url, params=params, headers=headers)
+        logger.info("Bluesky response status: %s", response.status_code)
         data = response.json()
-        if "feed" in data:
-            return data["feed"]
+        logger.info("Bluesky response JSON: %s", json.dumps(data, indent=2))
+    except Exception as ex:
+        logger.error("Error obteniendo o parseando Bluesky JSON: %s", ex)
+        return []
+    if "feed" in data:
+        return data["feed"]
+    else:
+        logger.warning("La respuesta de Bluesky no contiene la clave 'feed'")
     return []
 
+# Función para enviar posts de Bluesky a Telegram
 def send_bluesky_posts(context: CallbackContext):
     posts = fetch_bluesky_posts()
+    if not posts:
+        logger.warning("No se han obtenido posts de Bluesky.")
     for post in posts:
-        post_id = post.get("post", {}).get("cid") or post.get("post", {}).get("uri")
-        if post_id and post_id not in posted_bluesky_ids:
-            text = post.get("post", {}).get("text", "")
-            created_at = post.get("post", {}).get("createdAt", "")
-            message = f"🌀 Bluesky:\n{text}\n🕒 {created_at}"
-            context.bot.send_message(chat_id=CHANNEL_ID, text=message)
-            posted_bluesky_ids.add(post_id)
+        logger.info("Procesando post: %s", post)
+        post_data = post.get("post", {})
+        post_id = post_data.get("cid") or post_data.get("uri")
+        if not post_id:
+            logger.warning("No se encontró ID en el post: %s", post)
+            continue
+        if post_id in posted_bluesky_ids:
+            logger.info("El post %s ya fue enviado.", post_id)
+            continue
+        text = post_data.get("text", "")
+        created_at = post_data.get("createdAt", "")
+        message = f"🌀 Bluesky:\n{text}\n🕒 {created_at}"
+        context.bot.send_message(chat_id=CHANNEL_ID, text=message)
+        posted_bluesky_ids.add(post_id)
+
+# Función para obtener la programación de próximos partidos (en este ejemplo, se asume que la integración con Flashscore se mantiene, pero si falla, se puede ajustar)
+def send_next_match(context: CallbackContext):
+    # Si se desea integrar con Flashscore, se llamaría a una función aquí.
+    # En este ejemplo, eliminamos el scraping de Flashscore, así que se enviará un mensaje informativo.
+    context.bot.send_message(chat_id=CHANNEL_ID, text="ℹ️ Funcionalidad de próximos partidos no implementada actualmente.")
 
 def main():
     global bot
@@ -95,10 +118,12 @@ def main():
     
     dispatcher.add_handler(CommandHandler("start", start))
     
-    # Programa el envío de noticias cada 1 hora
+    # Programar el envío de noticias cada 1 hora
     updater.job_queue.run_repeating(send_news, interval=3600, first=10)
-    # Programa el envío de posts de Bluesky cada 1 hora
+    # Programar el envío de posts de Bluesky cada 1 hora
     updater.job_queue.run_repeating(send_bluesky_posts, interval=3600, first=20)
+    # Programar el envío de la programación de próximos partidos (en este ejemplo, solo un mensaje informativo)
+    updater.job_queue.run_repeating(send_next_match, interval=14400, first=30)
     
     updater.start_polling()
     updater.idle()
