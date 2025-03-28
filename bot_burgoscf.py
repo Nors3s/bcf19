@@ -14,6 +14,7 @@ from playwright.async_api import async_playwright
 # Configura variables desde entorno
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID", "@BurgosCF")
+BLUESKY_TOKEN = os.getenv("BLUESKY_TOKEN")  # Token para publicar en Bluesky
 
 # Validación de variables obligatorias
 print("🔍 TELEGRAM_TOKEN:", "✅" if TELEGRAM_TOKEN else "❌ VACÍO")
@@ -25,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 bot = None
 posted_titles = set()
+# Usamos posted_bluesky_ids para evitar duplicados si fuera necesario (en este ejemplo no se usa para publicar, solo para evitar reenvíos)
 posted_bluesky_ids = set()
 
 # Función de inicio para Telegram
@@ -52,62 +54,74 @@ def fetch_news():
                     posted_titles.add(entry.title)
     return mensajes
 
-# Función para enviar noticias a Telegram
+# Función para enviar noticias a Telegram y Bluesky
 def send_news(context: CallbackContext):
     noticias = fetch_news()
     for noticia in noticias:
         context.bot.send_message(chat_id=CHANNEL_ID, text=noticia)
+        send_to_bluesky(noticia)
 
-# Función para obtener posts de Bluesky
-def fetch_bluesky_posts():
-    url = "https://bsky.social/xrpc/app.bsky.feed.getActorTimeline"
-    params = {
-        "actor": "burgoscf.bsky.social",
-        "limit": 10
-    }
+# Función para enviar un mensaje a Bluesky mediante la API de Bluesky
+def send_to_bluesky(message: str):
+    if not BLUESKY_TOKEN:
+        logger.warning("BLUESKY_TOKEN no definido; no se enviará a Bluesky.")
+        return
+    url = "https://bsky.social/xrpc/app.bsky.feed.post"
     headers = {
-        "Accept": "application/json"
+        "Authorization": f"Bearer {BLUESKY_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "text": message
     }
     try:
-        response = requests.get(url, params=params, headers=headers)
-        logger.info("Bluesky response status: %s", response.status_code)
-        data = response.json()
-        logger.info("Bluesky response JSON: %s", json.dumps(data, indent=2))
-    except Exception as ex:
-        logger.error("Error obteniendo o parseando Bluesky JSON: %s", ex)
-        return []
-    if "feed" in data:
-        return data["feed"]
-    else:
-        logger.warning("La respuesta de Bluesky no contiene la clave 'feed'")
-    return []
+        response = requests.post(url, headers=headers, json=payload)
+        if response.status_code == 200:
+            logger.info("Mensaje enviado a Bluesky correctamente.")
+        else:
+            logger.error("Error enviando mensaje a Bluesky: %s %s", response.status_code, response.text)
+    except Exception as e:
+        logger.error("Excepción al enviar mensaje a Bluesky: %s", e)
 
-# Función para enviar posts de Bluesky a Telegram
-def send_bluesky_posts(context: CallbackContext):
-    posts = fetch_bluesky_posts()
-    if not posts:
-        logger.warning("No se han obtenido posts de Bluesky.")
-    for post in posts:
-        logger.info("Procesando post: %s", post)
-        post_data = post.get("post", {})
-        post_id = post_data.get("cid") or post_data.get("uri")
-        if not post_id:
-            logger.warning("No se encontró ID en el post: %s", post)
-            continue
-        if post_id in posted_bluesky_ids:
-            logger.info("El post %s ya fue enviado.", post_id)
-            continue
-        text = post_data.get("text", "")
-        created_at = post_data.get("createdAt", "")
-        message = f"🌀 Bluesky:\n{text}\n🕒 {created_at}"
-        context.bot.send_message(chat_id=CHANNEL_ID, text=message)
-        posted_bluesky_ids.add(post_id)
-
-# Función para obtener la programación de próximos partidos (en este ejemplo, se asume que la integración con Flashscore se mantiene, pero si falla, se puede ajustar)
+# Función para obtener la programación del próximo partido
+# (En este ejemplo, se mantiene la integración con Flashscore para extraer la info)
 def send_next_match(context: CallbackContext):
-    # Si se desea integrar con Flashscore, se llamaría a una función aquí.
-    # En este ejemplo, eliminamos el scraping de Flashscore, así que se enviará un mensaje informativo.
-    context.bot.send_message(chat_id=CHANNEL_ID, text="ℹ️ Funcionalidad de próximos partidos no implementada actualmente.")
+    asyncio.run(scrape_flashscore(context))
+
+async def scrape_flashscore(context: CallbackContext):
+    print("📡 Buscando próximos partidos del Burgos CF (Playwright/Flashscore)...")
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            page = await browser.new_page()
+            # Usamos la URL de Flashscore para el Burgos CF
+            await page.goto("https://www.flashscore.com/team/burgos-cf/vTxTEFi6/")
+            await page.wait_for_selector("div.event__match")
+            
+            partidos = await page.query_selector_all("div.event__match")
+            for elem in partidos:
+                clase = await elem.get_attribute("class")
+                if "event__match--scheduled" in clase:
+                    hora_elem = await elem.query_selector(".event__time")
+                    local_elem = await elem.query_selector(".event__participant--home")
+                    visitante_elem = await elem.query_selector(".event__participant--away")
+                    
+                    hora_text = await hora_elem.inner_text() if hora_elem else ""
+                    local_text = await local_elem.inner_text() if local_elem else ""
+                    visitante_text = await visitante_elem.inner_text() if visitante_elem else ""
+                    
+                    mensaje = f"📅 Próximo partido del Burgos CF:\n🏟️ {local_text} vs {visitante_text}\n🕒 Hora: {hora_text}"
+                    await browser.close()
+                    context.bot.send_message(chat_id=CHANNEL_ID, text=mensaje)
+                    send_to_bluesky(mensaje)
+                    return
+            
+            await browser.close()
+            # Si no se encuentra partido, no se envía mensaje (según tu solicitud)
+            logger.info("No se encontró información de próximo partido en Flashscore.")
+    except Exception as e:
+        context.bot.send_message(chat_id=CHANNEL_ID, text=f"⚠️ Error con Flashscore: {e}")
+        send_to_bluesky(f"⚠️ Error con Flashscore: {e}")
 
 def main():
     global bot
@@ -118,11 +132,12 @@ def main():
     
     dispatcher.add_handler(CommandHandler("start", start))
     
-    # Programar el envío de noticias cada 1 hora
+    # Programa el envío de noticias cada 1 hora
     updater.job_queue.run_repeating(send_news, interval=3600, first=10)
-    # Programar el envío de posts de Bluesky cada 1 hora
-    updater.job_queue.run_repeating(send_bluesky_posts, interval=3600, first=20)
-    # Programar el envío de la programación de próximos partidos (en este ejemplo, solo un mensaje informativo)
+    # Programa el envío de posts de Bluesky (ahora ya no se recuperan, sino que se envía lo que se publique en Telegram)
+    # En este ejemplo, la integración con Bluesky se realiza en send_news y send_next_match, enviando el mismo mensaje.
+    
+    # Programa el envío del próximo partido cada 4 horas
     updater.job_queue.run_repeating(send_next_match, interval=14400, first=30)
     
     updater.start_polling()
